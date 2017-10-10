@@ -1,0 +1,10 @@
+{
+  "name": "tvdb-namer",
+  "version": "1.0.0",
+  "description": "Rename files based on TVDB info.",
+  "main": "index.js",
+  "scripts": {
+  },
+  "author": "Ryan Wooden",
+  "license": "Apache-2.0"
+}
