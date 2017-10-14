@@ -1,5 +1,7 @@
 #!/usr/bin/env node --harmony
 
+// installation: npm install && npm link
+
 const inquirer = require('inquirer')
 const program = require('commander')
 const axios = require('axios')
