@@ -4,40 +4,58 @@ const inquirer = require('inquirer')
 const program = require('commander')
 const axios = require('axios')
 const stringSimilarity = require('string-similarity')
+const numeral = require('numeral')
+const path = require('path')
+const fs = require('fs')
 
 const key = '<TVDB KEY>'
 
 function askForMatches(files, episodes) {
-  const questions = files.map((file, index) => ({
-    type: 'list',
-    name: `${index}`,
-    message: `match for ${file}?`,
-    choices: (previousMatches) => getChoices(file, episodes, previousMatches),
-    default: 'skip'
-  }))
+  const parsedFiles = files.map(path.parse)
+  const questions = parsedFiles
+    .map((fileParts, index) => ({
+      type: 'list',
+      name: `${index}`,
+      message: `match for ${fileParts.base}?`,
+      choices: (previousMatches) => getChoices(fileParts.name, episodes, previousMatches),
+      default: 0,
+    }))
 
   return inquirer.prompt(questions)
   .then((answers) => {
     return Object.keys(answers)
       .reduce((prev, cur) => {
-        const file = files[Number(cur)]
         const response = answers[cur]
         if (response !== 'skip')
-          prev[file] = answers[cur]
+        {
+          const fileDetail = parsedFiles[Number(cur)]
+          const prevName = path.format(fileDetail)
+          const newName = path.format({
+            dir: fileDetail.dir,
+            ext: fileDetail.ext,
+            name: response,
+          })
+          prev[prevName] = newName
+        }
         return prev
       }, {})
   })
 }
 
-function getChoices(file, episodes, previousMatches) {
+function getChoices(fileName, episodes, previousMatches) {
   const previousResponses = Object.values(previousMatches)
   const possibleEpisodes = episodes.filter(name => !previousResponses.includes(name))
-  const bestMatches = stringSimilarity.findBestMatch(file, episodes).ratings
+  const bestMatches = stringSimilarity.findBestMatch(fileName, episodes).ratings
+
   bestMatches.sort((first, second) => second.rating - first.rating)
-  return ['skip', ...bestMatches.slice(0, 20).map(match => ({
+  const options = bestMatches.slice(0, 20).map(match => ({
     name: `${match.target} <${match.rating.toFixed(2)}>`,
     value: match.target,
-  }))]
+  }))
+
+  if (bestMatches.length && bestMatches[0].rating > 0.5)
+    return [...options, 'skip']
+  return ['skip', ...options]
 }
 
 function getApi() {
@@ -64,8 +82,9 @@ function getEpisodes(seriesIdOrName) {
       }
     })
     .then(response => {
-      if (response.data.data.length == 1)
-        return response.data.data[0].id
+      if (response.data.data.length == 1) {
+        return response.data.data[0]
+      }
 
       return inquirer.prompt({
         type: 'list',
@@ -73,41 +92,67 @@ function getEpisodes(seriesIdOrName) {
         message: `Which series did you mean?`,
         choices: response.data.data.map(d => ({
           name: d.seriesName,
-          value: d.id,
+          value: series,
         })),
       })
       .then(answers => answers.series)
     })
-    .then(seriesId => {
+    .then(series => {
       return new Promise((resolve, reject) => {
         console.log(`get page 1`)
         const getPage = (prevEpisodes, page) => {
-          api.get(`/series/${seriesId}/episodes`, {params: {page}}).then(result => {
+          api.get(`/series/${series.id}/episodes`, {params: {page}}).then(result => {
             const episodes = [...prevEpisodes, ...result.data.data]
             if (result.data.links.next !== null) {
               console.log(`get page ${result.data.links.next} of ${result.data.links.last}`)
               return getPage(episodes, result.data.links.next)
             }
-            resolve(episodes)
+            resolve([episodes, series])
           }).catch(reject)
         };
         getPage([], 1)
       })
     })
   })
-  .then(episodes => {
-    // TODO: fuller episode/file names here
+  .then(([episodes, series]) => {
     return episodes
-      .map(episode => episode.episodeName)
-      .filter(name => name)
+      .filter(episode => episode.episodeName)
+      .map(episode => ({
+        seriesName: series.seriesName,
+        series: numeral(episode.airedSeason).format('00'),
+        episode: numeral(episode.airedEpisodeNumber).format('00'),
+        name: episode.episodeName,
+      }))
+      .map(e => `${e.seriesName} - S${e.series}E${e.episode} - ${e.name}`)
   })
 }
 
 function renameFiles(oldToNewPairs) {
+  if (!Object.keys(oldToNewPairs))
+    return
+
   for (const from of Object.keys(oldToNewPairs)) {
     const to = oldToNewPairs[from]
-    console.log(`rename ${from} to ${to}`)
+    console.log(`mv "${from}"`)
+    console.log(`=> "${to}"`)
+    console.log("")
   }
+
+  inquirer.prompt({
+      type: 'confirm',
+      name: 'ok',
+      message: 'move files?',
+      default: false,
+  }).then((answers) => {
+    if (!answers.ok)
+      return
+    for (const from of Object.keys(oldToNewPairs)) {
+      const to = oldToNewPairs[from]
+      console.log(`mv "${from}" "${to}"`)
+      fs.renameSync(from, to)
+    }
+  })
+
 }
 
 program
