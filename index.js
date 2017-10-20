@@ -84,16 +84,21 @@ function getEpisodes(seriesIdOrName) {
       }
     })
     .then(response => {
-      if (response.data.data.length == 1) {
+      if (response.data.data.length === 1) {
         return response.data.data[0]
+      }
+
+      if (response.data.data.length === 0) {
+        console.log(JSON.stringify(response.data))
+        throw new Error("No matching series")
       }
 
       return inquirer.prompt({
         type: 'list',
         name: 'series',
         message: `Which series did you mean?`,
-        choices: response.data.data.map(d => ({
-          name: d.seriesName,
+        choices: response.data.data.map(series => ({
+          name: series.seriesName,
           value: series,
         })),
       })
